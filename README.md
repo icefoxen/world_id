@@ -60,3 +60,18 @@ CBOR isn't great but it might be the best available.  We can't use JSON or XML o
 Public key algorithm: Ed25519
 
 Oh, it would be useful to be able to enesure that these ident block thingies have a strictly limited upper size, to make it easy to reason about them and such.
+
+# Status
+
+## Done
+
+ * Create identities, create public/private keys, serialize/deserialize them both
+ * Add identities to IPFS, retrieve them again
+ * Sign messages with priv key, verify them with the ID retrieved from IPFS.
+
+## To do
+
+ * Publish a new id, replacing an old one, signed with the old one's private key
+ * Take an ID with a link to a previous old one and verify that the signature is valid
+ * Sign someone else's cert with your own... somehow.
+ * Encryption/decryption?  ring doesn't seem to do this...  :/

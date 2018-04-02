@@ -1,10 +1,3 @@
-// TODO:
-//
-// Higher-level operations:
-// Publish a new id, replacing an old one, signed with the old one's private key
-// Take a cert with a link to the old one and verify that it's valid
-// Sign someone else's cert with your own (eventually)
-// Encryption/decryption?  ring doesn't seem to do this...  :/
 
 extern crate chrono;
 #[macro_use]
