@@ -76,3 +76,5 @@ Oh, it would be useful to be able to enesure that these ident block thingies hav
  * Take an ID with a link to a previous old one and verify that the signature is valid
  * Sign someone else's cert with your own... somehow.
  * Encryption/decryption?  ring doesn't seem to do this...  :/
+ * Is there some way to revoke or replace keys that doesn't suck like certificate revocation lists do?
+ 
