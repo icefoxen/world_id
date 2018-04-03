@@ -305,7 +305,25 @@ impl Server {
     /// is correct, then recurses and continues looking down the chain of authority until it either fails to
     /// validate or reaches the end of the chain.
     pub fn verify_chain(&mut self, cid: &str) -> Result<bool, Error> {
-        Ok(false)
+        pub fn verify_chain_helper(server: &mut Server, child_id: &Id) -> Result<bool, Error> {
+            println!("Verifying {:?}", child_id);
+            if let Some(ref link) = child_id.prev_id {
+                let parent_id = server.get(&link.prev_id)?;
+                println!("parent is: {:?}", parent_id);
+                if parent_id.verify_child(&child_id) {
+                    verify_chain_helper(server, &parent_id)
+                } else {
+                    println!("Parent doesn't recognize child");
+                    Ok(false)
+                }
+            } else {
+                // End of chain, if we've gotten here without problems it's valid.
+                println!("End of chain");
+                Ok(true)
+            }
+        }
+        let root_id = self.get(cid)?;
+        verify_chain_helper(self, &root_id)
     }
 }
 
@@ -412,4 +430,31 @@ mod tests {
         }
 
     }
+
+    #[test]
+    fn test_id_verify_chain() {
+        let server = &mut Server::default().unwrap();
+        
+        // Create an ID 
+        let keypair = Keypair::new().unwrap();
+        let id = Id::new("foo!", &keypair).unwrap();
+        let cid = server.add(&id).unwrap();
+
+
+        // Create a child ID and verify 
+        let keypair_child = Keypair::new().unwrap();
+        let id_child = id.new_child(&cid, &keypair_child, &keypair).unwrap();
+        let cid_child = server.add(&id_child).unwrap();
+        assert!(id.verify_child(&id_child));
+        assert!(server.verify_chain(&cid_child).unwrap());
+
+        // Create grandchild and verify
+        let keypair_grandchild = Keypair::new().unwrap();
+        let id_grandchild = id_child.new_child(&cid_child, &keypair_grandchild, &keypair_child).unwrap();
+        let cid_grandchild = server.add(&id_grandchild).unwrap();
+        assert!(id_child.verify_child(&id_grandchild));
+        assert!(server.verify_chain(&cid_grandchild).unwrap());
+
+    }
+
 }
