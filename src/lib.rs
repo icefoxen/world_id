@@ -26,6 +26,8 @@ pub enum CryptoError {
     KeygenFailed,
     #[fail(display = "PKCS#8-formatted key was invalid; corrupt PEM file?")]
     InvalidKey,
+    #[fail(display = "Tried to sign an `Id` with a private key that doesn't match its public key.")]
+    WrongKey,
 }
 
 
@@ -105,12 +107,25 @@ impl Keypair {
         Ok(Keypair::Ed25519(pem.contents))
     }
 
+    /// Signs the given message with the keypair's private key.
     pub fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
             Keypair::Ed25519(ref pkcs8_bytes) => {
                 let kp = ring::signature::Ed25519KeyPair::from_pkcs8(
                             untrusted::Input::from(pkcs8_bytes))?;
                 Ok(kp.sign(msg).as_ref().to_vec())
+            }
+        }
+    }
+
+    /// This is annoying and maybe we should just store the ring keypair as well
+    /// as the pkcs8 bytes, idk.
+    fn public_key_bytes(&self) -> Result<Vec<u8>, Error> {
+        match *self {
+            Keypair::Ed25519(ref pkcs8_bytes) => {
+                let ring_keypair = ring::signature::Ed25519KeyPair::from_pkcs8(
+                    untrusted::Input::from(&pkcs8_bytes))?;
+                Ok(ring_keypair.public_key_bytes().to_owned())
             }
         }
     }
@@ -123,7 +138,21 @@ pub struct Id {
     public_key: Vec<u8>,
     creation_date: DateTime<Utc>,
     expiry_date: Option<DateTime<Utc>>,
+    prev_id: Option<IdLink>
 }
+
+/// A link to a previous `Id`, validated with a signature.
+/// The signature is the current `Id`, minus the `IdLink`,
+/// serialized to CBOR and signed by the previous `Id`'s
+/// private key.
+/// The `prev_id` is an IPFS CID referring to the previous
+/// `Id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdLink {
+    prev_id: String,
+    signature: Vec<u8>,
+}
+
 
 impl Id {
     pub fn new(id: &str, keypair: &Keypair) -> Result<Self, Error> {
@@ -137,9 +166,29 @@ impl Id {
                     public_key: pubkey_bytes.to_owned(),
                     creation_date: Utc::now(),
                     expiry_date: None,
+                    prev_id: None,
                 })
             }
         }
+    }
+
+    /// Creates a new `Id` descended from `self`, with the public key from
+    /// `new_keypair` and signed with the private key from `old_keypair` (ie,
+    /// the one `self` was created with.
+    pub fn new_child(&self, self_cid: &str, new_keypair: &Keypair, old_keypair: &Keypair) -> Result<Id, Error> {
+        if old_keypair.public_key_bytes()? != self.public_key {
+            return Err(CryptoError::WrongKey.into());
+        }
+        
+        let mut new_id = Id::new(&self.id, new_keypair)?;
+        let serialized_id = new_id.to_cbor()?;
+        let new_signature = old_keypair.sign(&serialized_id)?;
+        let link = IdLink {
+            prev_id: self_cid.to_owned(),
+            signature: new_signature,
+        };
+        new_id.prev_id = Some(link);
+        Ok(new_id)
     }
 
     // Takes the filename for a PEM file containing the public key,
@@ -166,6 +215,7 @@ impl Id {
         signature::verify(&signature::ED25519, pubkey, msg, sig)
             .is_ok()
     }
+
 }
 
 impl fmt::Display for Id {
