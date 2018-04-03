@@ -2,6 +2,15 @@
 name = "world_id"
 version = "0.1.0"
 authors = ["Simon Heath <icefoxen@gmail.com>"]
+description = "An experiment in creating a distributed PKI."
+repository = "https://github.com/icefoxen/world_id"
+readme = "README.md"
+keywords = ["ipfs", "crypto", "cryptography", "pki", "public-key"]
+categories = ["cryptography", "authentication", "network-programming"]
+license  = "Apache-2.0 OR MIT"
+
+[badges]
+maintenance = { status = "experimental" }
 
 [dependencies]
 chrono = {version = "0.4", features = ["serde"]}
