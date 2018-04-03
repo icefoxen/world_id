@@ -147,6 +147,10 @@ pub struct Id {
 /// private key.
 /// The `prev_id` is an IPFS CID referring to the previous
 /// `Id`.
+///
+/// It might be nicer to make this an arbitrary "this key signs
+/// that key" type structure, since that's a fairly useful
+/// general-purpose association.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdLink {
     prev_id: String,
@@ -191,10 +195,6 @@ impl Id {
         Ok(new_id)
     }
 
-    // Takes the filename for a PEM file containing the public key,
-    // with the tag "PUBLIC KEY", and 
-    //pub fn new_from_pem_file(
-
     pub fn to_cbor(&self) -> Result<Vec<u8>, Error> {
         serde_cbor::to_vec(self)
             .map_err(|e| Error::from(e))
@@ -204,7 +204,6 @@ impl Id {
         serde_cbor::from_slice(c)
             .map_err(|e| Error::from(e))
     }
-
 
     /// Returns whether or not the given message and signature were
     /// signed with this ID's private key.
@@ -216,6 +215,27 @@ impl Id {
             .is_ok()
     }
 
+    /// Returns whether or not the given child was signed with this ID's
+    /// private key.  
+    ///
+    /// Only verifies that one Id, not a whole chain, so
+    /// it does not check intermediate Id's.
+    /// ie, if `c` descends from `b` descends from `a`, `a.verify_child(c)`
+    /// returns false.
+    pub fn verify_child(&self, proposed_child: &Id) -> bool {
+        if let Some(ref link) = proposed_child.prev_id {
+            // Gotta modify a copy of the child to remove the prev_id section,
+            // then serialize it and verify the serialized form.
+            let mut child = proposed_child.clone();
+            child.prev_id = None;
+            let child_cbor = child.to_cbor().expect("Couldn't turn child to cbor; should this EVER happen?");
+            self.verify(&link.signature, &child_cbor)
+        } else {
+            // proposed_child has no prev_id section, so of course it's not
+            // a child of this Id.
+            false
+        }
+    }
 }
 
 impl fmt::Display for Id {
@@ -267,6 +287,25 @@ impl Server {
 
         let new_id = Id::from_cbor(&get_response)?;
         Ok(new_id)
+    }
+
+    /// A wrapper around `Id::new_child()`, it creates a new Id with the new keypair given, links it to the one
+    /// given by the CID (we need to find the CID for it anyway, so might as well look it up in the process),
+    /// and signs the new one wit the old one's private key.
+    /// Then shoves the new one into IPFS.
+    /// Returns the new ID and its CID.
+    pub fn replace(&mut self, cid: &str, new_keypair: &Keypair, old_keypair: &Keypair) -> Result<(Id, String), Error> {
+        let old_id = self.get(cid)?;
+        let new_id = old_id.new_child(cid, new_keypair, old_keypair)?;
+        let new_cid = self.add(&new_id)?;
+        Ok((new_id, new_cid))
+    }
+
+    /// Takes a CID for an `Id`, looks it up, and if it has a previous ID it validates that its signature
+    /// is correct, then recurses and continues looking down the chain of authority until it either fails to
+    /// validate or reaches the end of the chain.
+    pub fn verify_chain(&mut self, cid: &str) -> Result<bool, Error> {
+        Ok(false)
     }
 }
 
@@ -341,4 +380,36 @@ mod tests {
         assert!(!new_id.verify("some random signature".as_bytes(), message))
     }
 
+    #[test]
+    fn test_id_verify_children() {
+        let server = &mut Server::default().unwrap();
+        
+        // Create an ID 
+        let keypair_1 = Keypair::new().unwrap();
+        let id_1 = Id::new("foo!", &keypair_1).unwrap();
+        let cid_1 = server.add(&id_1).unwrap();
+
+
+        // Create a child ID and verify its a child.
+        {
+            let keypair_1_child = Keypair::new().unwrap();
+            let id_1_child = id_1.new_child(&cid_1, &keypair_1_child, &keypair_1).unwrap();
+            assert!(id_1.verify_child(&id_1_child));
+        }
+
+        // Create an unrelated ID and verify it is unrelated.
+        {
+            let keypair_new = Keypair::new().unwrap();
+            let id_new = Id::new("foo!", &keypair_new).unwrap();
+            assert!(!id_1.verify_child(&id_new));
+
+            // Create an child of id_new and verify it is unrelated to ID 1
+            let cid_new = server.add(&id_new).unwrap();
+            let keypair_new_child = Keypair::new().unwrap();
+            let id_new_child = id_new.new_child(&cid_new, &keypair_new_child, &keypair_new).unwrap();
+            assert!(id_new.verify_child(&id_new_child));
+            assert!(!id_1.verify_child(&id_new_child));
+        }
+
+    }
 }
